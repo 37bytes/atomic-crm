@@ -1,10 +1,10 @@
-import { type User } from "jsr:@supabase/supabase-js@2";
+import { type AuthenticatedUser } from "./authentication.ts";
 import { supabaseAdmin } from "./supabaseAdmin.ts";
 
 /**
  * Get the sale associated to the provided user.
  */
-export const getUserSale = async (user: User) => {
+export const getUserSale = async (user: AuthenticatedUser) => {
   return (
     await supabaseAdmin
       .from("sales")

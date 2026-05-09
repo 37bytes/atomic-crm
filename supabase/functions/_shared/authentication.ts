@@ -1,7 +1,11 @@
 // Based on https://github.com/supabase/supabase/blob/master/examples/edge-functions/supabase/functions/_shared/jwt/default.ts
 import * as jose from "jsr:@panva/jose@6";
-import { createClient, type User } from "jsr:@supabase/supabase-js@2";
 import { createErrorResponse } from "./utils.ts";
+
+export type AuthenticatedUser = {
+  id: string;
+  email?: string;
+};
 
 const SUPABASE_JWT_SECRET = new TextEncoder().encode(
   Deno.env.get("JWT_SECRET") ?? "",
@@ -26,6 +30,20 @@ function verifySupabaseJWT(jwt: string) {
   });
 }
 
+async function getVerifiedUser(req: Request): Promise<AuthenticatedUser> {
+  const token = getAuthToken(req);
+  const { payload } = await verifySupabaseJWT(token);
+
+  if (typeof payload.sub !== "string") {
+    throw new Error("Missing subject claim");
+  }
+
+  return {
+    id: payload.sub,
+    email: typeof payload.email === "string" ? payload.email : undefined,
+  };
+}
+
 /**
  * Validates the Authorization header to ensure that a user is authenticated.
  */
@@ -36,12 +54,8 @@ export const AuthMiddleware = async (
   if (req.method === "OPTIONS") return await next(req);
 
   try {
-    const token = getAuthToken(req);
-    const isValidJWT = await verifySupabaseJWT(token);
-
-    if (isValidJWT) return await next(req);
-
-    return createErrorResponse(401, "Invalid authentication");
+    await getVerifiedUser(req);
+    return await next(req);
   } catch (e) {
     return createErrorResponse(401, e?.toString() || "Unauthorized");
   }
@@ -53,26 +67,12 @@ export const AuthMiddleware = async (
  */
 export const UserMiddleware = async (
   req: Request,
-  next: (req: Request, user?: User) => Promise<Response>,
+  next: (req: Request, user: AuthenticatedUser) => Promise<Response>,
 ) => {
   if (req.method === "OPTIONS") return await next(req);
 
   try {
-    const authHeader = req.headers.get("Authorization")!;
-    const localClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SB_PUBLISHABLE_KEY") ??
-        Deno.env.get("SUPABASE_ANON_KEY") ??
-        "",
-      { global: { headers: { Authorization: authHeader } } },
-    );
-
-    const { data, error: authError } = await localClient.auth.getUser();
-    if (!data?.user || authError) {
-      return createErrorResponse(401, "Unauthorized");
-    }
-
-    return next(req, data.user);
+    return next(req, await getVerifiedUser(req));
   } catch (err) {
     return createErrorResponse(401, err?.toString() || "Unauthorized");
   }
