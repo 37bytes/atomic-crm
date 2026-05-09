@@ -33,7 +33,6 @@ async function createSale(
   user_id: string,
   data: {
     email: string;
-    password: string;
     first_name: string;
     last_name: string;
     disabled: boolean;
@@ -52,6 +51,33 @@ async function createSale(
   return sales.at(0);
 }
 
+async function getOrCreateSale(
+  user_id: string,
+  data: {
+    email: string;
+    first_name: string;
+    last_name: string;
+    disabled: boolean;
+    administrator: boolean;
+  },
+) {
+  const { data: sales, error: salesError } = await supabaseAdmin
+    .from("sales")
+    .select("*")
+    .eq("user_id", user_id);
+
+  if (salesError) {
+    console.error("Error fetching sale:", salesError);
+    throw salesError;
+  }
+
+  if (sales.length > 0) {
+    return sales.at(0);
+  }
+
+  return createSale(user_id, data);
+}
+
 async function updateSaleAvatar(user_id: string, avatar: string) {
   const { data: sales, error: salesError } = await supabaseAdmin
     .from("sales")
@@ -67,7 +93,7 @@ async function updateSaleAvatar(user_id: string, avatar: string) {
 }
 
 async function inviteUser(req: Request, currentUserSale: any) {
-  const { email, password, first_name, last_name, disabled, administrator } =
+  const { email, first_name, last_name, disabled, administrator } =
     await req.json();
 
   if (!currentUserSale.administrator) {
@@ -76,7 +102,8 @@ async function inviteUser(req: Request, currentUserSale: any) {
 
   const { data, error: userError } = await supabaseAdmin.auth.admin.createUser({
     email,
-    password,
+    email_confirm: true,
+    password: crypto.randomUUID() + crypto.randomUUID(),
     user_metadata: { first_name, last_name },
   });
 
@@ -116,7 +143,6 @@ async function inviteUser(req: Request, currentUserSale: any) {
 
       const sale = await createSale(user.id, {
         email,
-        password,
         first_name,
         last_name,
         disabled,
@@ -151,16 +177,18 @@ async function inviteUser(req: Request, currentUserSale: any) {
       console.error("Error inviting user: undefined user");
       return createErrorResponse(500, "Internal Server Error");
     }
-    const { error: emailError } =
-      await supabaseAdmin.auth.admin.inviteUserByEmail(email);
-
-    if (emailError) {
-      console.error(`Error inviting user, email_error=${emailError}`);
-      return createErrorResponse(500, "Failed to send invitation mail");
-    }
+    // Email/password auth is optional and may be disabled. Create the auth user
+    // and sales profile only; SSO users will sign in through the configured IdP.
   }
 
   try {
+    await getOrCreateSale(user.id, {
+      email,
+      first_name,
+      last_name,
+      disabled,
+      administrator,
+    });
     await updateSaleDisabled(user.id, disabled);
     const sale = await updateSaleAdministrator(user.id, administrator);
 
@@ -174,6 +202,132 @@ async function inviteUser(req: Request, currentUserSale: any) {
     );
   } catch (e) {
     console.error("Error patching sale:", e);
+    return createErrorResponse(500, "Internal Server Error");
+  }
+}
+
+async function countSaleReferences(table: string, sales_id: number) {
+  const { count, error } = await supabaseAdmin
+    .from(table)
+    .select("id", { count: "exact", head: true })
+    .eq("sales_id", sales_id);
+
+  if (error) {
+    console.error(`Error counting ${table} references:`, error);
+    throw error;
+  }
+
+  return count ?? 0;
+}
+
+async function deleteUser(req: Request, currentUserSale: any) {
+  const { sales_id } = await req.json();
+
+  if (!currentUserSale.administrator) {
+    return createErrorResponse(401, "Not Authorized");
+  }
+
+  const { data: sale, error: saleError } = await supabaseAdmin
+    .from("sales")
+    .select("*")
+    .eq("id", sales_id)
+    .single();
+
+  if (saleError || !sale) {
+    return createErrorResponse(404, "Not Found");
+  }
+
+  if (
+    sale.id === currentUserSale.id ||
+    sale.user_id === currentUserSale.user_id
+  ) {
+    return createErrorResponse(400, "You cannot delete your own user");
+  }
+
+  try {
+    const relatedCounts = await Promise.all(
+      [
+        "companies",
+        "contacts",
+        "contact_notes",
+        "deals",
+        "deal_notes",
+        "tasks",
+      ].map(async (table) => ({
+        table,
+        count: await countSaleReferences(table, sales_id),
+      })),
+    );
+    const relatedRecords = relatedCounts.filter(({ count }) => count > 0);
+
+    if (relatedRecords.length > 0) {
+      return createErrorResponse(
+        409,
+        "Cannot delete a user with related CRM records. Disable the user instead.",
+        { relatedRecords },
+      );
+    }
+
+    const { error: banError } = await supabaseAdmin.auth.admin.updateUserById(
+      sale.user_id,
+      { ban_duration: "87600h" },
+    );
+
+    if (banError) {
+      console.error("Error banning auth user before deletion:", banError);
+      return createErrorResponse(banError.status, banError.message, {
+        code: banError.code,
+      });
+    }
+
+    const { error: salesError } = await supabaseAdmin
+      .from("sales")
+      .delete()
+      .eq("id", sale.id);
+
+    if (salesError) {
+      console.error("Error deleting sale:", salesError);
+      await supabaseAdmin.auth.admin
+        .updateUserById(sale.user_id, { ban_duration: "none" })
+        .catch((unbanError) => {
+          console.error(
+            "Error unbanning auth user after sales delete failure:",
+            unbanError,
+          );
+        });
+      return createErrorResponse(salesError.status, salesError.message, {
+        code: salesError.code,
+      });
+    }
+
+    const { error: userError } = await supabaseAdmin.auth.admin.deleteUser(
+      sale.user_id,
+    );
+
+    if (userError) {
+      console.error("Error deleting auth user:", userError);
+      await createSale(sale.user_id, {
+        email: sale.email,
+        first_name: sale.first_name,
+        last_name: sale.last_name,
+        disabled: true,
+        administrator: sale.administrator,
+      }).catch((restoreError) => {
+        console.error(
+          "Error restoring sale after auth delete failure:",
+          restoreError,
+        );
+      });
+      return createErrorResponse(userError.status, userError.message, {
+        code: userError.code,
+      });
+    }
+
+    return new Response(JSON.stringify({ data: sale }), {
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    });
+  } catch (e) {
+    console.error("Error deleting user:", e);
     return createErrorResponse(500, "Internal Server Error");
   }
 }
@@ -274,6 +428,10 @@ Deno.serve(async (req: Request) =>
 
         if (req.method === "PATCH") {
           return patchUser(req, currentUserSale);
+        }
+
+        if (req.method === "DELETE") {
+          return deleteUser(req, currentUserSale);
         }
 
         return createErrorResponse(405, "Method Not Allowed");
