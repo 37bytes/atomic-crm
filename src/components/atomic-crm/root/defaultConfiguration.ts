@@ -7,6 +7,11 @@ export const defaultCurrency = "USD";
 
 export const defaultTitle = "Atomic CRM";
 
+export const defaultGoogleWorkplaceDomain = import.meta.env
+  .VITE_GOOGLE_WORKPLACE_DOMAIN;
+export const defaultDisableEmailPasswordAuthentication =
+  import.meta.env.VITE_DISABLE_EMAIL_PASSWORD_AUTHENTICATION === "true";
+
 export const defaultCompanySectors = [
   { value: "communication-services", label: "Communication Services" },
   { value: "consumer-discretionary", label: "Consumer Discretionary" },
@@ -70,4 +75,6 @@ export const defaultConfiguration: ConfigurationContextValue = {
   title: defaultTitle,
   darkModeLogo: defaultDarkModeLogo,
   lightModeLogo: defaultLightModeLogo,
+  googleWorkplaceDomain: defaultGoogleWorkplaceDomain,
+  disableEmailPasswordAuthentication: defaultDisableEmailPasswordAuthentication,
 };
