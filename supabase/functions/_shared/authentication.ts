@@ -6,8 +6,8 @@ import { createErrorResponse } from "./utils.ts";
 const SUPABASE_JWT_ISSUER =
   Deno.env.get("SB_JWT_ISSUER") ?? Deno.env.get("SUPABASE_URL") + "/auth/v1";
 
-const SUPABASE_JWT_KEYS = jose.createRemoteJWKSet(
-  new URL(Deno.env.get("SUPABASE_URL")! + "/auth/v1/.well-known/jwks.json"),
+const SUPABASE_JWT_SECRET = new TextEncoder().encode(
+  Deno.env.get("JWT_SECRET") ?? "",
 );
 
 function getAuthToken(req: Request) {
@@ -24,7 +24,8 @@ function getAuthToken(req: Request) {
 }
 
 function verifySupabaseJWT(jwt: string) {
-  return jose.jwtVerify(jwt, SUPABASE_JWT_KEYS, {
+  return jose.jwtVerify(jwt, SUPABASE_JWT_SECRET, {
+    algorithms: ["HS256"],
     issuer: SUPABASE_JWT_ISSUER,
   });
 }
