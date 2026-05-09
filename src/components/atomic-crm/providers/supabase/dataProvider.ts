@@ -86,6 +86,31 @@ const getDataProviderWithCustomMethods = () => {
 
       return baseDataProvider.getOne(resource, params);
     },
+    async delete(resource: string, params: any) {
+      if (resource !== "sales") {
+        return baseDataProvider.delete(resource, params);
+      }
+
+      const { data, error } = await getSupabaseClient().functions.invoke<{
+        data: Sale;
+      }>("users", {
+        method: "DELETE",
+        body: { sales_id: params.id },
+      });
+
+      if (!data || error) {
+        const errorDetails = await (async () => {
+          try {
+            return (await error?.context?.json()) ?? {};
+          } catch {
+            return {};
+          }
+        })();
+        throw new Error(errorDetails?.message || "Failed to delete the user");
+      }
+
+      return data;
+    },
 
     async signUp({ email, password, first_name, last_name }: SignUpData) {
       const response = await getSupabaseClient().auth.signUp({

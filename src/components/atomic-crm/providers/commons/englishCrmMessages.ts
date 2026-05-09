@@ -294,8 +294,7 @@ export const englishCrmMessages = {
       },
       create: {
         error: "An error occurred while creating the user.",
-        success:
-          "User created. They will soon receive an email to set their password.",
+        success: "User created. They can now sign in with SSO.",
         title: "Create a new user",
       },
       edit: {

@@ -301,7 +301,7 @@ export const frenchCrmMessages = {
         error:
           "Une erreur s'est produite lors de la création de l'utilisateur.",
         success:
-          "Utilisateur créé. Ils recevront prochainement un email pour définir leur mot de passe.",
+          "Utilisateur créé. Il peut maintenant se connecter avec le SSO.",
         title: "Créer un nouvel utilisateur",
       },
       edit: {

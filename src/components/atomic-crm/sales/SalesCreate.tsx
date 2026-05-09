@@ -22,7 +22,7 @@ export function SalesCreate() {
     onSuccess: () => {
       notify("resources.sales.create.success", {
         messageArgs: {
-          _: "User created. They will soon receive an email to set their password.",
+          _: "User created. They can now sign in with SSO.",
         },
       });
       redirect("/sales");
